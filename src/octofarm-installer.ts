@@ -4,7 +4,7 @@ import axios from "axios";
 import * as fs from "fs";
 import {createWriteStream, readdirSync} from "fs";
 import path from "path";
-import {ReleasesDto, ReleasesDtoSet} from "./schemas/releases";
+import {ReleasesDto} from "./schemas/releases";
 import {
     createFolderIfNotExists,
     patchPackageJsonBunyan,
@@ -14,7 +14,6 @@ import {
 import {getMergedValidatedConfig} from "./utils/parse-config.util";
 import {execSync} from "child_process";
 import {Config} from "./schemas/config.model";
-import githubApiClient from 'octonode';
 import decompress from 'decompress';
 import ProgressBar from "progress";
 
@@ -23,12 +22,12 @@ const finished = promisify(stream.finished);
 export async function downloadFile(fileUrl: string, basePath, releaseTag: string): Promise<any> {
     const writer = createWriteStream(path.join(basePath, `octofarm-${releaseTag}-download.zip`));
     console.warn('Downloading release from URL', fileUrl);
-    const { data, headers } = await axios({
+    const {data, headers} = await axios({
         timeout: 5000,
         url: fileUrl,
         method: 'GET',
         responseType: 'stream'
-    })
+    });
 
     let totalLength = headers['content-length'];
     let progressBar = null;
@@ -105,23 +104,26 @@ function ensurePm2Installed() {
     }
 }
 
+async function getGithubReleases(orgRepoUrlPart) {
+    return await axios({
+        url: `https://api.github.com/repos/${orgRepoUrlPart}/releases`,
+        method: 'GET',
+        headers: {
+            "Content-Type": "application/json",
+        },
+    })
+        .then((res) => res.data);
+}
+
 async function getLatestReleaseInfo(config: Config): Promise<ReleasesDto> {
     const repoUrl = config.getGithubRepoUrl();
-    const clientReleases = githubApiClient.client().repo(repoUrl);
     let latestRelease = null;
 
-    return await new Promise((resolve, reject) => {
-        clientReleases.releases(function (err, s: ReleasesDtoSet, b, h) {
-            if (!s || s.length === 0) {
-                throw new Error(`Received an empty list of releases for OctoFarm. Are you sure the right repository was configured? This is currently provided repo URL: ${repoUrl}`)
-            }
-            if (!!err) {
-                reject(err);
-            }
-            latestRelease = s[0] as ReleasesDto;
-            resolve(latestRelease);
+    return await getGithubReleases(repoUrl)
+        .then(r => {
+            latestRelease = r[0] as ReleasesDto;
+            return latestRelease;
         });
-    });
 }
 
 function getCurrentInstalledRelease(config: Config, release_tag_name): boolean {
